@@ -28,6 +28,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import Auth from "./Auth";
+import { supabase } from "./lib/supabase";
+import { loadUserData } from "./lib/loadUserData";
+import { saveUserData } from "./lib/saveUserData";
+import { seedInitialData } from "./lib/seed";
 
 const days = ["Chủ nhật", "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7"];
 const TARGET_WEIGHT = 65;
@@ -348,6 +353,7 @@ export default function SkinnyFatTransformPlanner() {
   const [tab, setTab] = useState("overview");
   const [data, setData] = useState(initialData);
   const [mounted, setMounted] = useState(false);
+  const [session, setSession] = useState(null);
   const [activeScheduleDay, setActiveScheduleDay] = useState(new Date().getDay());
   const [editorOpen, setEditorOpen] = useState(false);
   const [addExerciseOpen, setAddExerciseOpen] = useState(false);
@@ -356,18 +362,49 @@ export default function SkinnyFatTransformPlanner() {
   const [mealDraft, setMealDraft] = useState({ foodId: initialData.nutrition.foods[0].id, servings: 1, note: "" });
   const [weightCheckIn, setWeightCheckIn] = useState(initialData.profile.currentWeight);
 
-  useEffect(() => {
-    const saved = localStorage.getItem("skinny-fat-transform-planner-65kg-v4");
-    if (saved) {
-      setData(mergeSavedData(JSON.parse(saved)));
-    }
-    setMounted(true);
-  }, []);
+useEffect(() => {
+  supabase.auth.getSession().then(({ data }) => {
+    setSession(data.session);
+  });
 
-  useEffect(() => {
-    if (!mounted) return;
-    localStorage.setItem("skinny-fat-transform-planner-65kg-v4", JSON.stringify(data));
-  }, [data, mounted]);
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    setSession(session);
+  });
+
+  return () => subscription.unsubscribe();
+}, []);
+
+useEffect(() => {
+  if (!session?.user) return;
+
+  const init = async () => {
+    await seedInitialData(session.user.id, initialData);
+
+    const remoteData = await loadUserData(session.user.id);
+
+    setData((prev) => ({
+      ...prev,
+      ...remoteData,
+      profile: remoteData.profile || prev.profile,
+    }));
+
+    setMounted(true);
+  };
+
+  init();
+}, [session]);
+
+useEffect(() => {
+  if (!mounted || !session?.user) return;
+
+  const timer = setTimeout(() => {
+    saveUserData(session.user.id, data);
+  }, 500);
+
+  return () => clearTimeout(timer);
+}, [data, mounted, session]);
 
   useEffect(() => {
     const dateDay = parseDateKey(data.selectedDate).getDay();
@@ -672,11 +709,14 @@ export default function SkinnyFatTransformPlanner() {
   };
 
   const tabs = [
-    { id: "overview", label: "Tổng quan", icon: <BarChart3 className="h-4 w-4" /> },
-    { id: "workout", label: "Workout", icon: <Dumbbell className="h-4 w-4" /> },
+    { id: "overview", label: "Tổng quan", icon: <BarChart3 className="h-4 w-4" /> },    { id: "workout", label: "Workout", icon: <Dumbbell className="h-4 w-4" /> },
     { id: "nutrition", label: "Dinh dưỡng", icon: <Apple className="h-4 w-4" /> },
     { id: "settings", label: "Tiến trình", icon: <Pencil className="h-4 w-4" /> },
   ];
+
+  if (!session) {
+  return <Auth />;
+  }
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#eef2ff_35%,_#f8fafc_100%)] p-4 text-slate-900 md:p-8">
